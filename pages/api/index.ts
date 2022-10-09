@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import Cors from 'cors';
-import fetch from 'node-fetch';
+import http from "node:http";
 import { hitSuccessCounter, hitErrorCounter } from "./_utils"
 
 // Initializing the cors middleware
@@ -47,8 +47,6 @@ export default async function handler(
   const headers = Object.assign({}, req.headers);
   delete headers.host;
 
-  const contentType = headers["content-type"];
-
   const targetURL = decodeURIComponent(url as string);
   const targetHeaders = {
     ...headers,
@@ -57,55 +55,18 @@ export default async function handler(
     'accept-language': 'en-US,en;q=0.9',
     'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.5060.53 Safari/537.36 Edg/103.0.1264.37',
   }
-
-  if (req.method === "GET") {
-    try {
-      const isJsonRequest = contentType && contentType === "application/json";
-
-      const remoteResponse = await fetch(targetURL, {
-        // @ts-ignore
-        headers: targetHeaders
-      });
-      res.status(remoteResponse.status);
-
-      if (isJsonRequest) {
-        const remoteResponseJson = await remoteResponse.json();hitSuccessCounter();
-        res.json(remoteResponseJson);
-      } else {
-        const remoteResponseBody = await remoteResponse.text();hitSuccessCounter();
-        res.send(remoteResponseBody);
-      }
-    } catch (error) {
+  http[req.method.toLowerCase()]({
+    headers: targetHeaders,
+    href: targetURL,
+  }, (forwardedRes => {
+    hitSuccessCounter();
+    const responseStatusCode = forwardedRes.statusCode;
+    if (responseStatusCode > 201) {
       hitErrorCounter();
-      console.error("[ERR_CODE]: 5002");
-      res.status(500);
-      res.json({
-        success: false,
-        error: error,
-        code: 5002,
-      });
+    } else {
+      hitSuccessCounter();
     }
-  } else {
-    try {
-      const remoteResponse = await fetch(targetURL, {
-        method: req.method,
-        // @ts-ignore
-        headers: targetHeaders,
-        body: JSON.stringify(req.body)
-      })
-      res.status(remoteResponse.status);
-
-      const remoteResponseJson = await remoteResponse.json();hitSuccessCounter();
-      res.json(remoteResponseJson);
-    } catch (error) {
-      hitErrorCounter();
-      console.error("[ERR_CODE]: 5003");
-      res.status(500);
-      res.json({
-        success: false,
-        error: error,
-        code: 5003,
-      });
-    }
-  }
+    res.writeHead(responseStatusCode);
+    forwardedRes.pipe(res);
+  }))
 }
